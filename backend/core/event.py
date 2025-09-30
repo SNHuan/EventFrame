@@ -33,6 +33,7 @@ class Event(ABC):
     data: Dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    scope: str = 'local'  # 'local' | 'broadcast' | 'both'
 
     def __post_init__(self):
         """事件创建后的钩子"""
@@ -45,7 +46,8 @@ class Event(ABC):
             "name": self.name,
             "data": self.data,
             "timestamp": self.timestamp.isoformat(),
-            "metadata": self.metadata
+            "metadata": self.metadata,
+            "scope": self.scope
         }
 
 

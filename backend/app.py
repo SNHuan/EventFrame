@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import List, Dict, Any
 
 from core.event import EventBus, Event
+from core.event_policy import can_receive_from_frontend, is_sensitive_event
 import events.listeners as listeners_module
 from core.event import auto_register_listeners
 
@@ -44,8 +45,17 @@ def logging_middleware(event: Event) -> Event:
 
 
 def websocket_broadcast_middleware(event: Event) -> Event:
-    """WebSocket广播中间件 - 将所有事件实时推送到前端"""
-    socketio.emit('event', event.to_dict(), namespace='/')
+    """WebSocket广播中间件 - 根据事件scope决定是否推送到前端"""
+    # 检查事件作用域
+    if event.scope in ('broadcast', 'both'):
+        # 安全检查：敏感事件给出警告
+        if is_sensitive_event(event.name):
+            print(f"⚠️  警告: 敏感事件 {event.name} 正在广播到前端！建议使用 scope='local'")
+
+        socketio.emit('event', event.to_dict(), namespace='/')
+        print(f"📡 广播事件到前端: {event.name} (scope={event.scope})")
+    elif event.scope == 'local':
+        print(f"📍 事件 {event.name} 仅后端本地处理 (scope=local)")
     return event
 
 
@@ -96,7 +106,8 @@ def emit_event():
     请求体:
     {
         "name": "event.name",
-        "data": {"key": "value"}
+        "data": {"key": "value"},
+        "scope": "local" | "broadcast" | "both"  (可选，默认 "broadcast")
     }
     """
     try:
@@ -108,7 +119,8 @@ def emit_event():
         # 创建事件
         event = Event(
             name=payload['name'],
-            data=payload.get('data', {})
+            data=payload.get('data', {}),
+            scope=payload.get('scope', 'broadcast')  # 默认广播到前端
         )
 
         # 发布事件
@@ -118,7 +130,8 @@ def emit_event():
             'success': True,
             'event': event.to_dict(),
             'listeners_executed': len(results),
-            'results': [str(r) for r in results if r is not None]
+            'results': [str(r) for r in results if r is not None],
+            'scope': event.scope
         })
 
     except Exception as e:
@@ -189,10 +202,22 @@ def handle_disconnect():
 def handle_frontend_event(data):
     """处理来自前端的事件"""
     try:
+        event_name = data.get('name')
+
+        # 安全检查：验证事件是否允许从前端接收
+        if not can_receive_from_frontend(event_name):
+            emit('event_error', {
+                'error': f'事件 "{event_name}" 不允许从前端发送（私有事件）',
+                'event_name': event_name
+            })
+            print(f"🔒 拒绝前端事件: {event_name}")
+            return
+
         # 创建事件
         event = Event(
-            name=data.get('name'),
-            data=data.get('data', {})
+            name=event_name,
+            data=data.get('data', {}),
+            scope=data.get('scope', 'broadcast')  # 前端可以指定scope
         )
         event.metadata['source'] = 'frontend'
 
@@ -203,7 +228,8 @@ def handle_frontend_event(data):
         emit('event_result', {
             'success': True,
             'event': event.to_dict(),
-            'listeners_executed': len(results)
+            'listeners_executed': len(results),
+            'scope': event.scope
         })
 
     except Exception as e:
