@@ -146,6 +146,8 @@ export class WebSocketBridge {
     // 连接成功
     this.socket.on('connect', () => {
       console.log('✓ WebSocket 已连接');
+      console.log('✓ Socket ID:', this.socket?.id);
+      console.log('✓ 注册的事件监听器:', this.socket?.listeners('event').length);
       this.connectionStatus = 'connected';
       this.notifyStatusChange('connected');
     });
@@ -164,8 +166,9 @@ export class WebSocketBridge {
 
     // 接收后端广播的事件
     this.socket.on('event', (eventData) => {
+      console.log('📨 WebSocket 收到 event 消息:', eventData);
       if (this.options.syncRemoteEvents) {
-        console.log('📨 收到后端事件:', eventData);
+        console.log('📨 收到后端事件，准备发布到本地事件总线:', eventData);
 
         // 将后端事件发布到本地事件总线
         const event: IEvent = {
@@ -178,8 +181,11 @@ export class WebSocketBridge {
           },
         };
 
+        console.log('📨 发布事件到本地总线:', event);
         // 发布到本地，但不触发反向同步
         this.eventBus.emit(event);
+      } else {
+        console.log('⚠️ syncRemoteEvents 为 false，跳过事件');
       }
     });
 

@@ -12,7 +12,6 @@ from typing import List, Dict, Any
 from core.event import EventBus, Event
 from core.event_policy import can_receive_from_frontend, is_sensitive_event
 from core.config_loader import config
-import events.listeners as listeners_module
 from core.event import auto_register_listeners
 
 
@@ -71,8 +70,12 @@ def websocket_broadcast_middleware(event: Event) -> Event:
         if is_sensitive_event(event.name):
             print(f"⚠️  警告: 敏感事件 {event.name} 正在广播到前端！建议使用 scope='local'")
 
-        socketio.emit('event', event.to_dict(), namespace='/')
-        print(f"📡 广播事件到前端: {event.name} (scope={event.scope})")
+        print(f"📡 准备广播事件到前端: {event.name} (当前连接数: {connected_clients})")
+        # 使用 socketio.emit() 进行广播到所有客户端
+        # 注意：在中间件中调用需要使用 to= 参数或在应用上下文中
+        with app.app_context():
+            socketio.emit('event', event.to_dict(), namespace='/')
+        print(f"📡 广播事件完成: {event.name} (scope={event.scope})")
     elif event.scope == 'local':
         print(f"📍 事件 {event.name} 仅后端本地处理 (scope=local)")
 
@@ -99,13 +102,12 @@ if config.middleware.enable_websocket_broadcast:
 
 def init_event_system():
     """初始化事件系统"""
-    # 自动注册所有监听器
-    auto_register_listeners(listeners_module, event_bus)
+    # 注册 Todo 应用监听器
+    import events.todo_events as todo_events
+    auto_register_listeners(todo_events, event_bus)
 
-    # 注册广播示例（可选）
-    # import events.broadcast_examples as broadcast_examples
-    # broadcast_examples.set_event_bus(event_bus)
-    # auto_register_listeners(broadcast_examples, event_bus)
+    # 可选：注册其他监听器
+    # auto_register_listeners(listeners_module, event_bus)
 
     print("✓ 事件系统初始化完成")
     print(f"✓ 已注册监听器: {len(event_bus._listeners)} 个事件类型")
@@ -205,6 +207,18 @@ def get_listeners():
     })
 
 
+# ============= Todo API - 仅用于初始化查询 =============
+
+@app.route('/api/todos', methods=['GET'])
+def get_todos():
+    """获取所有 Todos（初始化加载）"""
+    from events.todo_events import get_all_todos
+    return jsonify({
+        'todos': get_all_todos(),
+        'total': len(get_all_todos())
+    })
+
+
 # ============= WebSocket 事件处理 =============
 
 @socketio.on('connect')
@@ -253,6 +267,14 @@ def handle_frontend_event(data):
 
         # 发布到后端事件总线
         results = event_bus.emit(event)
+
+        # 检查监听器是否返回了需要广播的数据
+        # 监听器可以返回 {'broadcast': {...}} 来请求广播
+        for result in results:
+            if isinstance(result, dict) and 'broadcast' in result:
+                broadcast_data = result['broadcast']
+                print(f"📡 监听器请求广播: {broadcast_data.get('name')}")
+                emit('event', broadcast_data, broadcast=True)
 
         # 响应前端
         emit('event_result', {
