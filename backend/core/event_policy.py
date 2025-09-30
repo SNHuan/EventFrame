@@ -5,8 +5,7 @@
 流转控制由 event.scope 负责
 """
 
-# 禁止前端发送的事件（黑名单）
-FRONTEND_BLOCKED_PREFIXES = ['private.', 'system.', 'admin.', 'auth.', 'internal.']
+from .config_loader import config
 
 
 def can_receive_from_frontend(event_name: str) -> bool:
@@ -15,7 +14,8 @@ def can_receive_from_frontend(event_name: str) -> bool:
 
     简单规则：只要不在黑名单就允许
     """
-    for prefix in FRONTEND_BLOCKED_PREFIXES:
+    blocked_prefixes = config.security.blocked_prefixes or []
+    for prefix in blocked_prefixes:
         if event_name.startswith(prefix):
             return False
     return True
@@ -26,7 +26,8 @@ def is_sensitive_event(event_name: str) -> bool:
     检查是否是敏感事件
     敏感事件建议使用 scope='local'
     """
-    for prefix in FRONTEND_BLOCKED_PREFIXES:
+    sensitive_prefixes = config.security.sensitive_prefixes or []
+    for prefix in sensitive_prefixes:
         if event_name.startswith(prefix):
             return True
     return False

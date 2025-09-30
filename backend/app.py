@@ -11,6 +11,7 @@ from typing import List, Dict, Any
 
 from core.event import EventBus, Event
 from core.event_policy import can_receive_from_frontend, is_sensitive_event
+from core.config_loader import config
 import events.listeners as listeners_module
 from core.event import auto_register_listeners
 
@@ -20,7 +21,11 @@ app = Flask(__name__)
 CORS(app)  # 允许跨域
 
 # 创建SocketIO实例 - 实现WebSocket支持
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+socketio = SocketIO(
+    app,
+    cors_allowed_origins=config.websocket.cors_origins,
+    async_mode=config.websocket.async_mode
+)
 
 # 创建全局事件总线
 event_bus = EventBus()
@@ -36,10 +41,13 @@ connected_clients = 0
 
 def logging_middleware(event: Event) -> Event:
     """日志中间件 - 记录所有事件"""
-    print(f"[{event.timestamp}] Event: {event.name} | Data: {event.data}")
+    if config.logging.verbose:
+        print(f"[{event.timestamp}] Event: {event.name} | Data: {event.data}")
+
     event_history.append(event.to_dict())
-    # 只保留最近100条
-    if len(event_history) > 100:
+    # 只保留最近N条
+    max_history = config.event_system.max_history
+    if len(event_history) > max_history:
         event_history.pop(0)
     return event
 
@@ -66,10 +74,13 @@ def validation_middleware(event: Event) -> Event:
     return event
 
 
-# 注册中间件
-event_bus.use_middleware(logging_middleware)
-event_bus.use_middleware(validation_middleware)
-event_bus.use_middleware(websocket_broadcast_middleware)
+# 注册中间件（根据配置）
+if config.middleware.enable_logging:
+    event_bus.use_middleware(logging_middleware)
+if config.middleware.enable_validation:
+    event_bus.use_middleware(validation_middleware)
+if config.middleware.enable_websocket_broadcast:
+    event_bus.use_middleware(websocket_broadcast_middleware)
 
 
 # ============= 初始化 =============
@@ -120,7 +131,7 @@ def emit_event():
         event = Event(
             name=payload['name'],
             data=payload.get('data', {}),
-            scope=payload.get('scope', 'broadcast')  # 默认广播到前端
+            scope=payload.get('scope', config.event_system.default_scope)
         )
 
         # 发布事件
@@ -141,7 +152,8 @@ def emit_event():
 @app.route('/api/events/history', methods=['GET'])
 def get_event_history():
     """获取事件历史"""
-    limit = request.args.get('limit', 50, type=int)
+    limit = request.args.get('limit', config.api.default_history_limit, type=int)
+    limit = min(limit, config.api.max_history_limit)  # 限制最大值
     return jsonify({
         'events': event_history[-limit:],
         'total': len(event_history)
@@ -217,7 +229,7 @@ def handle_frontend_event(data):
         event = Event(
             name=event_name,
             data=data.get('data', {}),
-            scope=data.get('scope', 'broadcast')  # 前端可以指定scope
+            scope=data.get('scope', config.event_system.default_frontend_scope)
         )
         event.metadata['source'] = 'frontend'
 
@@ -251,8 +263,8 @@ if __name__ == '__main__':
     print("\n" + "="*50)
     print("🚀 EventFrame Backend Server Starting...")
     print("="*50)
-    print(f"📡 HTTP Server: http://localhost:5000")
-    print(f"🔌 WebSocket Server: ws://localhost:5000")
+    print(f"📡 HTTP Server: http://{config.server.host}:{config.server.port}")
+    print(f"🔌 WebSocket Server: ws://{config.server.host}:{config.server.port}")
     print(f"\n📚 API Endpoints:")
     print(f"   - POST   /api/events           发布事件")
     print(f"   - GET    /api/events/history   事件历史")
@@ -264,4 +276,10 @@ if __name__ == '__main__':
     print(f"   - subscribe                    订阅事件")
     print("="*50 + "\n")
 
-    socketio.run(app, debug=True, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
+    socketio.run(
+        app,
+        debug=config.server.debug,
+        host=config.server.host,
+        port=config.server.port,
+        allow_unsafe_werkzeug=True
+    )
