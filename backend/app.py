@@ -53,8 +53,19 @@ def logging_middleware(event: Event) -> Event:
 
 
 def websocket_broadcast_middleware(event: Event) -> Event:
-    """WebSocket广播中间件 - 根据事件scope决定是否推送到前端"""
-    # 检查事件作用域
+    """
+    WebSocket广播中间件 - 根据事件scope决定是否推送到前端
+
+    重要：只有后端主动发起的事件才会广播
+    来自前端的事件不会自动反弹回去
+    """
+    # 检查事件来源：如果来自前端，默认不广播（除非监听器创建了新事件）
+    if event.metadata.get('source') == 'frontend':
+        # 前端发来的事件，仅后端处理，不反弹
+        print(f"📥 接收前端事件: {event.name} (仅后端处理)")
+        return event
+
+    # 后端主动发起的事件，根据 scope 决定是否广播
     if event.scope in ('broadcast', 'both'):
         # 安全检查：敏感事件给出警告
         if is_sensitive_event(event.name):
@@ -64,6 +75,7 @@ def websocket_broadcast_middleware(event: Event) -> Event:
         print(f"📡 广播事件到前端: {event.name} (scope={event.scope})")
     elif event.scope == 'local':
         print(f"📍 事件 {event.name} 仅后端本地处理 (scope=local)")
+
     return event
 
 
@@ -89,6 +101,12 @@ def init_event_system():
     """初始化事件系统"""
     # 自动注册所有监听器
     auto_register_listeners(listeners_module, event_bus)
+
+    # 注册广播示例（可选）
+    # import events.broadcast_examples as broadcast_examples
+    # broadcast_examples.set_event_bus(event_bus)
+    # auto_register_listeners(broadcast_examples, event_bus)
+
     print("✓ 事件系统初始化完成")
     print(f"✓ 已注册监听器: {len(event_bus._listeners)} 个事件类型")
 

@@ -15,6 +15,8 @@ export interface BridgeOptions {
   autoConnect?: boolean;
   syncLocalEvents?: boolean; // 是否将本地事件同步到后端
   syncRemoteEvents?: boolean; // 是否将后端事件同步到本地
+  allowedEvents?: string[]; // 允许同步的事件列表（支持通配符）
+  blockedEvents?: string[]; // 禁止同步的事件列表
 }
 
 export class WebSocketBridge {
@@ -31,11 +33,44 @@ export class WebSocketBridge {
       autoConnect: options.autoConnect !== false,
       syncLocalEvents: options.syncLocalEvents !== false,
       syncRemoteEvents: options.syncRemoteEvents !== false,
+      allowedEvents: options.allowedEvents || ['user.*', 'order.*', 'notification.*', 'public.*'],
+      blockedEvents: options.blockedEvents || ['private.*', 'system.*', 'admin.*', 'auth.*'],
     };
 
     if (this.options.autoConnect) {
       this.connect();
     }
+  }
+
+  /**
+   * 检查事件是否允许同步
+   */
+  private isEventAllowed(eventName: string): boolean {
+    // 检查黑名单
+    for (const blocked of this.options.blockedEvents!) {
+      if (blocked.endsWith('*')) {
+        const prefix = blocked.slice(0, -1);
+        if (eventName.startsWith(prefix)) {
+          return false;
+        }
+      } else if (eventName === blocked) {
+        return false;
+      }
+    }
+
+    // 检查白名单
+    for (const allowed of this.options.allowedEvents!) {
+      if (allowed.endsWith('*')) {
+        const prefix = allowed.slice(0, -1);
+        if (eventName.startsWith(prefix)) {
+          return true;
+        }
+      } else if (eventName === allowed) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -178,6 +213,12 @@ export class WebSocketBridge {
     this.eventBus.on('*', (event) => {
       // 避免循环：不同步来自后端的事件
       if (event.metadata?.source === 'backend') {
+        return;
+      }
+
+      // 安全检查：只同步允许的事件
+      if (!this.isEventAllowed(event.name)) {
+        console.log('🔒 事件不允许同步到后端:', event.name);
         return;
       }
 

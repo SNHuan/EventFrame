@@ -20,7 +20,11 @@ export class EventApiClient {
   /**
    * 发布事件到后端
    */
-  static async emitToBackend(eventName: string, data: any): Promise<EventResponse> {
+  static async emitToBackend(
+    eventName: string,
+    data: any,
+    scope: 'local' | 'broadcast' | 'both' = 'broadcast'
+  ): Promise<EventResponse> {
     const response = await fetch(`${API_BASE}/events`, {
       method: 'POST',
       headers: {
@@ -29,6 +33,7 @@ export class EventApiClient {
       body: JSON.stringify({
         name: eventName,
         data,
+        scope,
       }),
     });
 

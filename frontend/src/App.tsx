@@ -9,43 +9,50 @@ function App() {
   const [backendEvents, setBackendEvents] = useState<any[]>([]);
   const [backendStatus, setBackendStatus] = useState<string>('检查中...');
   const [wsStatus, setWsStatus] = useState<string>('disconnected');
-  const [syncEnabled, setSyncEnabled] = useState<boolean>(true);
   const [selectedEvent, setSelectedEvent] = useState<string>('user.created');
   const [eventData, setEventData] = useState<string>('{"username": "Alice", "email": "alice@example.com"}');
+  const [sendMode, setSendMode] = useState<'local' | 'backend' | 'both'>('local');
+  const [backendScope, setBackendScope] = useState<'local' | 'broadcast' | 'both'>('broadcast');
   const bridgeRef = useRef<WebSocketBridge | null>(null);
 
   // 初始化本地事件监听器
   useEffect(() => {
     // 监听所有事件并更新UI
-    const unsubscribe = globalEventBus.on('*', (event) => {
+    const unsubscribeAll = globalEventBus.on('*', (event) => {
       console.log('🎯 本地事件:', event);
       setLocalEvents((prev) => [...prev, event].slice(-10)); // 只保留最近10条
     });
 
     // 注册示例监听器
-    globalEventBus.on('user.created', (event) => {
+    const unsubscribeUser = globalEventBus.on('user.created', (event) => {
       console.log('👤 用户创建:', event.data);
     }, { priority: 10 });
 
-    globalEventBus.on('order.placed', (event) => {
+    const unsubscribeOrder = globalEventBus.on('order.placed', (event) => {
       console.log('📦 订单创建:', event.data);
     }, { priority: 5 });
 
-    globalEventBus.on('notification.send', (event) => {
+    const unsubscribeNotification = globalEventBus.on('notification.send', (event) => {
       console.log('🔔 发送通知:', event.data);
     });
 
-    return () => unsubscribe();
+    // 清理所有监听器
+    return () => {
+      unsubscribeAll();
+      unsubscribeUser();
+      unsubscribeOrder();
+      unsubscribeNotification();
+    };
   }, []);
 
   // 初始化WebSocket桥接器
   useEffect(() => {
-    // 创建桥接器
+    // 创建桥接器 - 只接收后端事件，不自动同步本地事件
     bridgeRef.current = createBridge(globalEventBus, {
       url: 'http://localhost:5000',
       autoConnect: true,
-      syncLocalEvents: syncEnabled,
-      syncRemoteEvents: true,
+      syncLocalEvents: false, // 关闭自动同步
+      syncRemoteEvents: true,  // 接收后端推送
     });
 
     // 监听连接状态
@@ -58,7 +65,7 @@ function App() {
       unsubscribe();
       bridgeRef.current?.disconnect();
     };
-  }, [syncEnabled]);
+  }, []);
 
   // 检查后端状态
   useEffect(() => {
@@ -74,24 +81,36 @@ function App() {
     }
   };
 
-  const emitLocalEvent = () => {
+  const emitEvent = async () => {
     try {
       const data = JSON.parse(eventData);
-      globalEventBus.emit(selectedEvent, data);
-    } catch (error) {
-      alert('数据格式错误，请输入有效的JSON');
-    }
-  };
 
-  const emitBackendEvent = async () => {
-    try {
-      const data = JSON.parse(eventData);
-      const response = await EventApiClient.emitToBackend(selectedEvent, data);
-      console.log('Backend response:', response);
-      alert(`✅ 事件已发送到后端\\n执行了 ${response.listeners_executed} 个监听器`);
-      await refreshBackendHistory();
+      if (sendMode === 'local') {
+        // 仅前端本地
+        globalEventBus.emit(selectedEvent, data);
+        console.log('📍 仅前端流转');
+      } else if (sendMode === 'backend') {
+        // 仅发送到后端
+        const response = await EventApiClient.emitToBackend(selectedEvent, data, backendScope);
+        console.log('🌐 仅发送到后端:', response);
+        const scopeText = backendScope === 'local' ? '仅后端本地' :
+                         backendScope === 'broadcast' ? '已广播到其他前端' :
+                         '后端本地+广播';
+        alert(`✅ 后端处理完成 (${scopeText})\\n执行了 ${response.listeners_executed} 个监听器`);
+        await refreshBackendHistory();
+      } else if (sendMode === 'both') {
+        // 前端和后端都发送
+        globalEventBus.emit(selectedEvent, data);
+        const response = await EventApiClient.emitToBackend(selectedEvent, data, backendScope);
+        console.log('🔄 前端+后端同时处理:', response);
+        const scopeText = backendScope === 'local' ? '仅后端本地' :
+                         backendScope === 'broadcast' ? '已广播到其他前端' :
+                         '后端本地+广播';
+        alert(`✅ 前后端都已处理 (${scopeText})\\n后端执行了 ${response.listeners_executed} 个监听器`);
+        await refreshBackendHistory();
+      }
     } catch (error: any) {
-      alert(`❌ 发送失败: ${error.message}`);
+      alert(`❌ 错误: ${error.message}`);
     }
   };
 
@@ -134,16 +153,9 @@ function App() {
           {wsStatus === 'connected' ? '✅ 已连接' :
            wsStatus === 'connecting' ? '🔄 连接中...' :
            '❌ 未连接'}
-        </div>
-        <div className="status-item">
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <input
-              type="checkbox"
-              checked={syncEnabled}
-              onChange={(e) => setSyncEnabled(e.target.checked)}
-            />
-            <span>自动同步到后端</span>
-          </label>
+          <span style={{ fontSize: '0.85rem', marginLeft: '8px', opacity: 0.7 }}>
+            (接收后端推送)
+          </span>
         </div>
         <button onClick={checkBackendHealth} className="btn-small">
           🔄 刷新
@@ -162,11 +174,19 @@ function App() {
               onChange={(e) => setSelectedEvent(e.target.value)}
               className="select"
             >
-              <option value="user.created">user.created - 用户创建</option>
-              <option value="user.updated">user.updated - 用户更新</option>
-              <option value="user.deleted">user.deleted - 用户删除</option>
-              <option value="order.placed">order.placed - 订单创建</option>
-              <option value="notification.send">notification.send - 发送通知</option>
+              <optgroup label="✅ 公开事件 (可互通)">
+                <option value="user.created">user.created - 用户创建</option>
+                <option value="user.updated">user.updated - 用户更新</option>
+                <option value="user.deleted">user.deleted - 用户删除</option>
+                <option value="order.placed">order.placed - 订单创建</option>
+                <option value="notification.send">notification.send - 发送通知</option>
+                <option value="public.test">public.test - 公开测试事件</option>
+              </optgroup>
+              <optgroup label="🔒 私有事件 (仅本地)">
+                <option value="private.sensitive">private.sensitive - 敏感操作</option>
+                <option value="system.internal">system.internal - 系统内部</option>
+                <option value="admin.action">admin.action - 管理员操作</option>
+              </optgroup>
             </select>
           </div>
 
@@ -181,14 +201,86 @@ function App() {
             />
           </div>
 
-          <div className="button-group">
-            <button onClick={emitLocalEvent} className="btn btn-primary">
-              🖥️ 发送到本地
-            </button>
-            <button onClick={emitBackendEvent} className="btn btn-secondary">
-              🌐 发送到后端
-            </button>
+          <div className="form-group">
+            <label>发送模式:</label>
+            <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="sendMode"
+                  value="local"
+                  checked={sendMode === 'local'}
+                  onChange={(e) => setSendMode(e.target.value as any)}
+                />
+                <span>🖥️ 仅前端</span>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="sendMode"
+                  value="backend"
+                  checked={sendMode === 'backend'}
+                  onChange={(e) => setSendMode(e.target.value as any)}
+                />
+                <span>🌐 仅后端</span>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="sendMode"
+                  value="both"
+                  checked={sendMode === 'both'}
+                  onChange={(e) => setSendMode(e.target.value as any)}
+                />
+                <span>🔄 前后端都发</span>
+              </label>
+            </div>
           </div>
+
+          {sendMode !== 'local' && (
+            <div className="form-group" style={{ marginTop: '10px', paddingLeft: '10px', borderLeft: '3px solid #667eea' }}>
+              <label style={{ fontSize: '0.9rem' }}>后端处理后:</label>
+              <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', fontSize: '0.9rem' }}>
+                  <input
+                    type="radio"
+                    name="backendScope"
+                    value="local"
+                    checked={backendScope === 'local'}
+                    onChange={(e) => setBackendScope(e.target.value as any)}
+                  />
+                  <span>📍 仅后端本地</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', fontSize: '0.9rem' }}>
+                  <input
+                    type="radio"
+                    name="backendScope"
+                    value="broadcast"
+                    checked={backendScope === 'broadcast'}
+                    onChange={(e) => setBackendScope(e.target.value as any)}
+                  />
+                  <span>📡 广播到前端</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', fontSize: '0.9rem' }}>
+                  <input
+                    type="radio"
+                    name="backendScope"
+                    value="both"
+                    checked={backendScope === 'both'}
+                    onChange={(e) => setBackendScope(e.target.value as any)}
+                  />
+                  <span>🔄 都执行</span>
+                </label>
+              </div>
+            </div>
+          )}
+
+          <button onClick={emitEvent} className="btn btn-primary" style={{ width: '100%' }}>
+            📤 发送事件
+            {sendMode === 'local' && ' (仅前端)'}
+            {sendMode === 'backend' && ' (仅后端)'}
+            {sendMode === 'both' && ' (前后端)'}
+          </button>
         </div>
 
         {/* 本地事件历史 */}
@@ -254,7 +346,10 @@ function App() {
       <footer className="footer">
         <p>💡 提示: 打开浏览器控制台查看详细日志</p>
         <p style={{ marginTop: '10px', fontSize: '0.9rem' }}>
-          🔌 WebSocket实时互通: 本地事件{syncEnabled ? '会' : '不会'}自动同步到后端 | 后端事件会实时推送到前端
+          📍 三种模式: 🖥️ 仅前端本地流转 | 🌐 仅发送到后端处理 | 🔄 前后端同时处理
+        </p>
+        <p style={{ marginTop: '5px', fontSize: '0.85rem', opacity: 0.8 }}>
+          后端事件会通过WebSocket自动推送到前端显示
         </p>
       </footer>
     </div>
