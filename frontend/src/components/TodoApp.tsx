@@ -1,10 +1,8 @@
 import { useState, useEffect } from 'react';
-import { List, Input, Button, Checkbox, Card, Space, message, Typography } from 'antd';
+import { List, Input, Button, Checkbox, Card, Space, message } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { globalEventBus } from '../core/EventBus';
 import { TodoApi } from '../api/todoApi';
-
-const { Title } = Typography;
 
 interface Todo {
   id: number;
@@ -89,10 +87,7 @@ export const TodoApp = () => {
   const completedCount = todos.filter(t => t.completed).length;
 
   return (
-    <Card
-      style={{ maxWidth: 800, margin: '40px auto' }}
-      title={<Title level={3} style={{ margin: 0 }}>📝 Todo 事件驱动示例</Title>}
-    >
+    <Card title="📝 待办清单">
       <Space.Compact style={{ width: '100%', marginBottom: 16 }}>
         <Input
           placeholder="输入新任务..."
@@ -112,18 +107,17 @@ export const TodoApp = () => {
         </Button>
       </Space.Compact>
 
-      <div style={{ marginBottom: 16, color: '#888' }}>
+      <div style={{ marginBottom: 16, color: '#8c8c8c' }}>
         总计: {todos.length} | 已完成: {completedCount} | 未完成: {todos.length - completedCount}
       </div>
 
       <List
         dataSource={todos}
-        locale={{ emptyText: '暂无任务，添加一个试试吧！' }}
+        locale={{ emptyText: '暂无任务' }}
         renderItem={(todo) => (
           <List.Item
             style={{
               opacity: todo.completed ? 0.6 : 1,
-              transition: 'all 0.3s',
             }}
             actions={[
               <Button
@@ -152,16 +146,6 @@ export const TodoApp = () => {
           </List.Item>
         )}
       />
-
-      <div style={{ marginTop: 24, padding: 16, background: '#f5f5f5', borderRadius: 8 }}>
-        <Title level={5}>💡 事件驱动特性演示：</Title>
-        <ul style={{ margin: 0, paddingLeft: 20 }}>
-          <li>✅ 创建任务 → 后端事件处理 → 自动广播到所有客户端</li>
-          <li>🔄 多开浏览器窗口，任务实时同步</li>
-          <li>📡 WebSocket 自动推送更新，无需刷新</li>
-          <li>🎯 前后端完全解耦，通过事件通信</li>
-        </ul>
-      </div>
     </Card>
   );
 };

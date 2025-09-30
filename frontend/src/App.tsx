@@ -33,18 +33,11 @@ function App() {
   return (
     <div className="app">
       <header className="header">
-        <h1>🎯 EventFrame - Todo 应用示例</h1>
-        <p>简洁优雅的事件驱动架构演示</p>
+        <h1>EventFrame Todo</h1>
+        <p>事件驱动架构示例</p>
       </header>
 
       <TodoApp />
-
-      <footer className="footer">
-        <p>💡 多开浏览器窗口，体验实时同步效果</p>
-        <p style={{ marginTop: '10px', fontSize: '0.9rem', opacity: 0.8 }}>
-          打开控制台查看事件流转详情
-        </p>
-      </footer>
     </div>
   );
 }
